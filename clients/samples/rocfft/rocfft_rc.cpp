@@ -102,6 +102,7 @@ void printoutput(const std::vector<Toutput>& output,
         do
         {
             const int i = std::inner_product(index.begin(), index.end(), stride.begin(), b * dist);
+            std::cout << i << ": ";            
             std::cout << output[i] << " ";
             for(int i = 0; i < index.size(); ++i)
             {
@@ -163,27 +164,27 @@ int main(int argc, char* argv[])
         = vm.count("inverse") ? rocfft_transform_type_real_forward
         : rocfft_transform_type_real_inverse;
 
-    
     // Set the device:
     hipSetDevice(deviceId);
 
     // Determine problem and buffer size:
     const size_t real_size = std::accumulate(length.begin(), length.end(),
-                                         1, std::multiplies<size_t>());
+                                             1, std::multiplies<size_t>());
     const size_t real_bytes = real_size * sizeof(double);
-    const size_t complex_size = std::accumulate(length.begin() + 1, length.end(),
-                                                length[0] / 2 + 1, std::multiplies<size_t>());
+    std::vector<size_t> complex_length = length;
+    complex_length[0] = length[0] / 2 + 1;
+    const size_t complex_size = std::accumulate(complex_length.begin(), complex_length.end(),
+                                                1, std::multiplies<size_t>());
     const size_t complex_bytes = real_size * sizeof(std::complex<double>);
 
-    const size_t isize = direction == rocfft_transform_type_real_forward ? real_size : complex_size;
-    const size_t ibytes = isize *
-        (direction == rocfft_transform_type_real_forward
-         ? sizeof(double) : sizeof(std::complex<double>));
-    
-    const size_t osize = direction == rocfft_transform_type_real_forward ? complex_size : real_size;
-    const size_t obytes = osize *
-        (direction == rocfft_transform_type_real_forward
-         ? sizeof(std::complex<double>) : sizeof(double));
+    const size_t isize = (direction == rocfft_transform_type_real_forward)
+        ? real_size : complex_size;
+    const size_t ibytes =  (direction == rocfft_transform_type_real_forward)
+        ? real_bytes : complex_bytes;
+    const size_t osize = (direction == rocfft_transform_type_real_forward)
+        ? complex_size : real_size;
+    const size_t obytes = (direction == rocfft_transform_type_real_forward
+         ? complex_bytes : real_bytes);
     
     // Create HIP device object and copy data to device
     void* gpu_in = NULL;
@@ -227,9 +228,10 @@ int main(int argc, char* argv[])
     hip_status = hipGetLastError();
     assert(hip_status == hipSuccess);
 
+
     std::cout << "input:\n";
     std::vector<double> idata(isize);
-    hipMemcpy(cdata.data(), gpu_in, rbytes, hipMemcpyDefault);
+    hipMemcpy(idata.data(), gpu_in, ibytes, hipMemcpyDefault);
     // We need to calculate the normal input stride (column-major) for outputting
     // arbitrary-dimensional arrays:
     std::vector<size_t> istride = {1};
@@ -237,8 +239,7 @@ int main(int argc, char* argv[])
     {
         istride.push_back(length[i - 1] * istride[i - 1]);
     }
-    printoutput(rdata, length, istride, 1, isize);
-
+    printoutput(idata, length, istride, 1, isize);
 
     // rocfft_status can be used to capture API status info
     rocfft_status rc = rocfft_status_success;
@@ -275,7 +276,7 @@ int main(int argc, char* argv[])
     }
 
     // If the transform is out-of-place, allocate the output buffer as well:
-    void* gpu_out = place == rocfft_placement_notinplace ? (double*)gpu_in : NULL;
+    void* gpu_out = place == rocfft_placement_notinplace ? gpu_in : NULL;
     if(place != rocfft_placement_notinplace)
     {
         hip_status = hipMalloc(&gpu_out, obytes);
@@ -290,13 +291,14 @@ int main(int argc, char* argv[])
 
     // Get the output from the device and print to cout:
     std::cout << "output:\n";
-    hipMemcpy(cdata.data(), gpu_out, complex_bytes, hipMemcpyDeviceToHost);
+    std::vector<std::complex<double>> odata(isize);
+    hipMemcpy(odata.data(), gpu_out, obytes, hipMemcpyDeviceToHost);
     std::vector<size_t> ostride = {1};
-    for(int i = 1; i < length.size(); ++i)
+    for(int i = 1; i < complex_length.size(); ++i)
     {
-        ostride.push_back(length[i - 1] * ostride[i - 1]);
+        ostride.push_back(complex_length[i - 1] * ostride[i - 1]);
     }
-    printoutput(cdata, length, ostride, 1, osize);
+    printoutput(odata, complex_length, ostride, 1, osize);
 
     
     // Clean up: free GPU memory:
@@ -314,6 +316,6 @@ int main(int argc, char* argv[])
     rocfft_execution_info_destroy(planinfo);
     rocfft_plan_description_destroy(gpu_description);
     rocfft_plan_destroy(gpu_plan);
-    
+
     return 0;
 }
