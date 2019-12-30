@@ -34,7 +34,7 @@ if(NOT Boost_LIBRARIES)
   set(Boost_LIBRARIES Boost::program_options)
 endif()
 
-set( sample_list rocfft_c2c)
+set( sample_list rocfft_c2c rocfft_rc)
 
 foreach( sample ${sample_list} )
 
